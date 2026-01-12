@@ -1,0 +1,25 @@
+services:
+  manus-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manus-sandbox
+    restart: unless-stopped
+    volumes:
+      - ./workspace:/workspace
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    # Resource limits for safety
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+    # Network isolation
+    networks:
+      - manus-network
+
+networks:
+  manus-network:
+    driver: bridge

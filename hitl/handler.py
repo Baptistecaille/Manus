@@ -90,7 +90,7 @@ def hitl_handler_node(state: AgentStateDict) -> dict:
             "current_breakpoint": "",
             "awaiting_human_input": False,
             "bash_validation_status": (
-                "skipped"
+                "approved"
                 if breakpoint_type == BreakpointType.BASH_COMMAND
                 else state.get("bash_validation_status", "pending")
             ),

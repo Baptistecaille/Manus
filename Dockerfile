@@ -17,9 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tree \
     jq \
     unzip \
+    sudo \
     ca-certificates \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
+
 
 # Install Node.js 20 LTS
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -43,6 +45,8 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Create non-root user for security
 RUN useradd -m -s /bin/bash agent \
+    && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
+    && chmod 0440 /etc/sudoers.d/agent \
     && chown -R agent:agent /workspace
 
 # Keep container running

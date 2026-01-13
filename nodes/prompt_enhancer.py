@@ -16,6 +16,14 @@ from pydantic import BaseModel, Field
 from agent_state import AgentStateDict, estimate_tokens
 from llm_factory import create_llm
 from seedbox_executor import SeedboxExecutor
+from nodes.schema import (
+    EnhancerOutput,
+    AnalysisResult,
+    ContextEnrichment,
+    RiskAssessment,
+    RiskFactor,
+    ExecutionHints,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,69 +80,28 @@ SENSITIVE_KEYWORDS = {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class AnalysisResult(BaseModel):
-    """Analysis of the original query."""
+# ═══════════════════════════════════════════════════════════════════════════════
+# PYDANTIC MODELS FOR STRUCTURED OUTPUT
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    original_query: str
-    detected_intent: str = Field(
-        description="One of: code_generation, web_research, data_analysis, file_manipulation, mixed_workflow"
-    )
-    confidence_score: float = Field(ge=0.0, le=1.0)
-    reasoning: str
-    ambiguities_detected: list[str] = Field(default_factory=list)
-    assumptions_made: list[str] = Field(default_factory=list)
-
-
-class ContextEnrichment(BaseModel):
-    """Context added to the query."""
-
-    relevant_workspace_files: list[str] = Field(default_factory=list)
-    suggested_tools: list[str] = Field(default_factory=list)
-    technical_constraints_applied: list[str] = Field(default_factory=list)
-
-
-class RiskFactor(BaseModel):
-    """Individual risk factor detected."""
-
-    type: str
-    severity: int = Field(ge=1, le=10)
-    description: str
-
-
-class RiskAssessment(BaseModel):
-    """Risk assessment result."""
-
-    global_level: str = Field(description="One of: low, medium, high, critical")
-    risk_factors: list[RiskFactor] = Field(default_factory=list)
-    recommended_hitl_level: str = Field(description="One of: strict, moderate, minimal")
-
-
-class ExecutionHints(BaseModel):
-    """Hints for execution planning."""
-
-    estimated_complexity: str = Field(description="One of: simple, moderate, complex")
-    suggested_timeout: int = 180
-    requires_internet: bool = False
-    requires_file_access: list[str] = Field(default_factory=list)
-
-
-class EnhancerOutput(BaseModel):
-    """Complete output from the Prompt Enhancer."""
-
-    analysis: AnalysisResult
-    enhanced_query: str
-    context_enrichment: ContextEnrichment
-    risk_assessment: RiskAssessment
-    execution_hints: ExecutionHints
+# Validation models are now imported from nodes.schema
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SYSTEM PROMPT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = """# RÔLE
+from prompts import get_base_system_prompt
+
+# Base capabilities from centralized source
+BASE_CAPABILITIES = get_base_system_prompt()
+
+SYSTEM_PROMPT = f"""# RÔLE
 Tu es le "Context Engineering Module" de Manus Agent, un système d'analyse
 et d'optimisation de requêtes pour agents autonomes.
+
+# CONTEXTE DE L'AGENT
+{BASE_CAPABILITIES}
 
 # MISSION
 Transformer une requête utilisateur brute en une spécification structurée
@@ -160,16 +127,8 @@ Catégorise la requête:
 Fournis un score de confiance (0.0-1.0).
 
 ## ÉTAPE 3: Injection de Contexte
-Intègre ces informations dans ta reformulation:
-
-### Workspace Context:
-{workspace_context}
-
-### Contraintes Techniques:
-- Environnement: Docker sandbox isolé
-- Timeout maximum par commande: {max_timeout}s
-- Répertoire de travail: /workspace
-- Commandes interdites: {forbidden_commands}
+Les informations de contexte (fichiers, contraintes) sont fournies dynamiquement ci-dessous.
+Intègre-les pour vérifier la faisabilité et la sécurité.
 
 ## ÉTAPE 4: Détection des Risques
 Identifie les signaux de danger:
@@ -197,52 +156,7 @@ Produis une version améliorée qui:
 4. Ajoute des critères de validation du succès
 
 # FORMAT DE SORTIE
-
-Réponds UNIQUEMENT avec un JSON valide (pas de markdown, pas de texte avant/après):
-
-{{
-  "analysis": {{
-    "original_query": "...",
-    "detected_intent": "code_generation|web_research|data_analysis|file_manipulation|mixed_workflow",
-    "confidence_score": 0.95,
-    "reasoning": "Explication de ton analyse en 2-3 phrases",
-    "ambiguities_detected": ["Liste des points flous"],
-    "assumptions_made": ["Liste des hypothèses que tu as faites"]
-  }},
-  
-  "enhanced_query": "VERSION OPTIMISÉE DE LA REQUÊTE ICI",
-  
-  "context_enrichment": {{
-    "relevant_workspace_files": ["fichier1.py", "config.json"],
-    "suggested_tools": ["bash", "search"],
-    "technical_constraints_applied": ["timeout: 300s", "no sudo access"]
-  }},
-  
-  "risk_assessment": {{
-    "global_level": "low|medium|high|critical",
-    "risk_factors": [
-      {{
-        "type": "destructive_command",
-        "severity": 8,
-        "description": "Utilisation de 'rm' détectée"
-      }}
-    ],
-    "recommended_hitl_level": "strict|moderate|minimal"
-  }},
-  
-  "execution_hints": {{
-    "estimated_complexity": "simple|moderate|complex",
-    "suggested_timeout": 180,
-    "requires_internet": true,
-    "requires_file_access": ["read", "write"]
-  }}
-}}
-
-# RÈGLES STRICTES
-1. Ne JAMAIS inventer d'informations absentes du contexte
-2. En cas de doute, indiquer explicitement l'ambiguité
-3. Privilégier la sécurité: surestimer le risque plutôt que sous-estimer
-4. Répondre UNIQUEMENT en JSON valide, sans texte additionnel
+# Tu DOIS formater ta réponse selon le schéma JSON EnhancerOutput.
 """
 
 
@@ -335,39 +249,10 @@ def collect_workspace_context() -> dict:
         }
 
 
+# Helper function `parse_enhancer_response` is no longer needed but kept empty to avoid breaking refs if any
 def parse_enhancer_response(response_text: str) -> Optional[EnhancerOutput]:
-    """
-    Parse the LLM response into a structured EnhancerOutput.
-
-    Args:
-        response_text: Raw LLM response.
-
-    Returns:
-        EnhancerOutput or None if parsing fails.
-    """
-    try:
-        # Try to extract JSON from the response
-        # Handle potential markdown code blocks
-        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", response_text)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            # Try to find raw JSON
-            json_str = response_text.strip()
-
-        # Parse JSON
-        data = json.loads(json_str)
-
-        # Validate with Pydantic
-        return EnhancerOutput(**data)
-
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parsing failed: {e}")
-        logger.debug(f"Response was: {response_text[:500]}")
-        return None
-    except Exception as e:
-        logger.error(f"Failed to parse enhancer response: {e}")
-        return None
+    """Deprecated: Parsing is now handled by with_structured_output."""
+    return None
 
 
 def determine_hitl_mode(risk_level: str, current_mode: str) -> str:
@@ -444,11 +329,25 @@ def prompt_enhancer_node(state: AgentStateDict) -> dict:
     keyword_risk, keyword_factors = detect_keyword_risk(original_query)
 
     # Build the prompt
-    prompt = SYSTEM_PROMPT.format(
-        workspace_context=json.dumps(workspace_context, indent=2),
-        max_timeout=max_timeout,
-        forbidden_commands=", ".join(forbidden_commands),
-    )
+    # Build the prompt
+    # Note: SYSTEM_PROMPT is already an f-string template or partial string
+    # We need to be careful with double formatting.
+    # The simplest way is to append dynamic parts.
+
+    # Build the prompt
+    dynamic_context = f"""
+# DYNAMIC CONTEXT
+
+### Workspace Context:
+{json.dumps(workspace_context, indent=2)}
+
+### Contraintes Techniques:
+- Environnement: Docker sandbox isolé
+- Timeout maximum par commande: {max_timeout}s
+- Répertoire de travail: /workspace
+- Commandes interdites: {", ".join(forbidden_commands)}
+"""
+    prompt = SYSTEM_PROMPT + dynamic_context
 
     user_message = f"""Analyse et optimise cette requête utilisateur:
 
@@ -458,23 +357,25 @@ REQUÊTE ORIGINALE:
 Réponds avec un JSON valide uniquement."""
 
     try:
-        # Call LLM
+        # Call LLM with structured output
         llm = create_llm(temperature=0.3)  # Lower temperature for precision
+        structured_llm = llm.with_structured_output(EnhancerOutput)
 
         messages = [
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_message},
         ]
 
-        response = llm.invoke(messages)
-        response_text = (
-            response.content if hasattr(response, "content") else str(response)
-        )
+        # invoke now returns the Pydantic object directly
+        parsed = structured_llm.invoke(messages)
 
-        logger.debug(f"Enhancer LLM response: {response_text[:500]}...")
+        if parsed is None:
+            raise ValueError("LLM returned None for structured output")
 
-        # Parse response
-        parsed = parse_enhancer_response(response_text)
+        logger.debug(f"Enhancer LLM structured response received")
+
+        # Parse response (redundant now, but keeping var name 'parsed')
+        # parsed = parse_enhancer_response(response_text) # Removed
 
         if parsed:
             # Merge keyword-detected risks with LLM-detected risks

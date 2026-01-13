@@ -267,15 +267,42 @@ def create_agent_graph(
     # Add edges
     # ═══════════════════════════════════════════════════════════════════
 
+    # Adding Specialized Agents
+    from agents.swe_agent import create_swe_graph
+
+    swe_graph = create_swe_graph()
+    workflow.add_node("swe_agent", swe_graph)
+
+    # Defined intent routing logic
+    def intent_router(state: AgentStateDict) -> str:
+        """Route to specialized agents based on detected intent."""
+        intent = state.get("detected_intent", "mixed_workflow")
+        logger.info(f"Routing based on intent: {intent}")
+
+        if intent in ["code_generation", "file_manipulation"]:
+            return "swe_agent"
+
+        # Default to general planner
+        return "planner"
+
     if enable_prompt_enhancer and enable_hitl:
         # Prompt enhancer → HITL handler (for validation)
         workflow.add_edge("prompt_enhancer", "hitl_handler")
 
         # HITL handler routes based on state
+        # We intercept the "planner" route to check for specialized intents first
+        def hitl_next_node(state: AgentStateDict) -> str:
+            route = hitl_router(state)
+            if route == "planner":
+                # If going to planner, check if we can specialize
+                return intent_router(state)
+            return route
+
         workflow.add_conditional_edges(
             "hitl_handler",
-            hitl_router,
+            hitl_next_node,
             {
+                "swe_agent": "swe_agent",
                 "planner": "planner",
                 "bash_executor": "bash_executor",
                 "pre_bash_validator": "pre_bash_validator",
@@ -283,8 +310,17 @@ def create_agent_graph(
             },
         )
     elif enable_prompt_enhancer:
-        # No HITL - direct to planner
-        workflow.add_edge("prompt_enhancer", "planner")
+        # No HITL - route directly based on intent
+        workflow.add_conditional_edges(
+            "prompt_enhancer",
+            intent_router,
+            {"swe_agent": "swe_agent", "planner": "planner"},
+        )
+
+    # SWE Agent returns to END (task complete) or Planner (if fallback needed)
+    # For now, let's assume if SWE agent finishes, the task is done or needs check.
+    # We route successful SWE execution to END.
+    workflow.add_edge("swe_agent", END)
 
     # Build conditional edge mapping from planner
     edge_map = {

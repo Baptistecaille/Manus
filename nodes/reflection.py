@@ -12,6 +12,7 @@ from typing import List, Tuple
 from deep_research_state import DeepResearchStateDict
 from deep_research_config import DeepResearchConfig, DEFAULT_CONFIG
 from llm_factory import create_llm
+from nodes.schema import ReflectionOutput
 
 logger = logging.getLogger(__name__)
 
@@ -83,58 +84,8 @@ def _build_findings_text(findings: List[dict], max_chars: int = 15000) -> str:
     return "\n\n".join(parts)
 
 
-def _parse_reflection(response_text: str) -> Tuple[List[str], List[str], bool, str]:
-    """
-    Parse reflection response.
-
-    Returns:
-        Tuple of (well_covered, knowledge_gaps, should_continue, reasoning)
-    """
-    well_covered = []
-    knowledge_gaps = []
-    should_continue = False
-    reasoning = ""
-
-    # Parse WELL_COVERED section
-    well_match = re.search(
-        r"WELL_COVERED:\s*\n(.*?)(?=KNOWLEDGE_GAPS:|$)",
-        response_text,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if well_match:
-        for line in well_match.group(1).split("\n"):
-            line = line.strip()
-            if line.startswith("-"):
-                well_covered.append(line[1:].strip())
-
-    # Parse KNOWLEDGE_GAPS section
-    gaps_match = re.search(
-        r"KNOWLEDGE_GAPS:\s*\n(.*?)(?=CONTRADICTIONS:|$)",
-        response_text,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if gaps_match:
-        for line in gaps_match.group(1).split("\n"):
-            line = line.strip()
-            if line.startswith("-"):
-                gap = line[1:].strip()
-                # Filter out non-gaps
-                if gap and gap.lower() not in ("none", "n/a", "none identified"):
-                    knowledge_gaps.append(gap)
-
-    # Parse RECOMMENDATION
-    rec_match = re.search(r"RECOMMENDATION:\s*(YES|NO)", response_text, re.IGNORECASE)
-    if rec_match:
-        should_continue = rec_match.group(1).upper() == "YES"
-
-    # Parse REASONING
-    reason_match = re.search(
-        r"REASONING:\s*(.+?)$", response_text, re.DOTALL | re.IGNORECASE
-    )
-    if reason_match:
-        reasoning = reason_match.group(1).strip()[:500]
-
-    return well_covered, knowledge_gaps, should_continue, reasoning
+# regex parsing function `_parse_reflection` is removed as we use structured output
+# def _parse_reflection(response_text: str) -> Tuple[List[str], List[str], bool, str]: ...
 
 
 def reflection_node(
@@ -193,8 +144,9 @@ def reflection_node(
             model=config.reflection_model,
             temperature=config.reflection_temperature,
         )
+        structured_llm = llm.with_structured_output(ReflectionOutput)
 
-        response = llm.invoke(
+        parsed: ReflectionOutput = structured_llm.invoke(
             [
                 {
                     "role": "system",
@@ -204,14 +156,13 @@ def reflection_node(
             ]
         )
 
-        response_text = (
-            response.content if hasattr(response, "content") else str(response)
-        )
+        if parsed is None:
+            raise ValueError("LLM returned None for structured output")
 
-        # Parse response
-        well_covered, knowledge_gaps, llm_continue, reasoning = _parse_reflection(
-            response_text
-        )
+        well_covered = parsed.well_covered_aspects
+        knowledge_gaps = parsed.knowledge_gaps
+        llm_continue = parsed.should_continue
+        reasoning = parsed.reasoning
 
         # Apply depth limit
         new_depth = current_depth + 1

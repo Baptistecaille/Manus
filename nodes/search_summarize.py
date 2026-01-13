@@ -12,6 +12,7 @@ from typing import List, Dict, Any
 from deep_research_state import DeepResearchStateDict
 from deep_research_config import DeepResearchConfig, DEFAULT_CONFIG
 from llm_factory import create_llm
+from nodes.schema import SearchSummaryOutput
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,16 @@ def _summarize_result(
     )
 
     try:
-        response = llm.invoke(
+        # Use structured output if the LLM isn't passed with it already,
+        # but here we are passed a generic LLM. We should probably wrap it here or expect it wrapped.
+        # Since the `llm` arg is passed in `search_and_summarize_node`, we'll wrap it there.
+        # However, `_summarize_result` is called inside a loop.
+        # Better to instantiate the structured version once in the main node function.
+        # But for now let's just use it here locally or check if it supports it.
+        # Simpler: Just use with_structured_output here. It returns a Runnable.
+        structured_llm = llm.with_structured_output(SearchSummaryOutput)
+
+        parsed: SearchSummaryOutput = structured_llm.invoke(
             [
                 {
                     "role": "system",
@@ -130,42 +140,26 @@ def _summarize_result(
             ]
         )
 
-        response_text = (
-            response.content if hasattr(response, "content") else str(response)
-        )
-
-        # Parse response
-        summary = ""
-        source_type = "unknown"
-        relevance = "medium"
-
-        if "SUMMARY:" in response_text:
-            summary_match = response_text.split("SUMMARY:")[-1]
-            if "SOURCE_TYPE:" in summary_match:
-                summary = summary_match.split("SOURCE_TYPE:")[0].strip()
-            else:
-                summary = summary_match.strip()
-        else:
-            summary = response_text.strip()
-
-        if "SOURCE_TYPE:" in response_text:
-            source_match = response_text.split("SOURCE_TYPE:")[-1]
-            if "RELEVANCE:" in source_match:
-                source_type = source_match.split("RELEVANCE:")[0].strip().lower()
-            else:
-                source_type = source_match.strip()[:20].lower()
-
-        if "RELEVANCE:" in response_text:
-            relevance = response_text.split("RELEVANCE:")[-1].strip()[:10].lower()
+        if parsed is None:
+            # Fallback to using content directly if structured output fails
+            return {
+                "query": query,
+                "title": title,
+                "url": url,
+                "snippet": content[:500],
+                "summary": content[:300],
+                "source_quality": "unknown",
+                "relevance": "unknown",
+            }
 
         return {
             "query": query,
             "title": title,
             "url": url,
             "snippet": content[:500],
-            "summary": summary[: config.max_summary_tokens * 4],  # Rough char limit
-            "source_quality": source_type,
-            "relevance": relevance,
+            "summary": parsed.summary[: config.max_summary_tokens * 4],
+            "source_quality": parsed.source_type,
+            "relevance": parsed.relevance,
         }
 
     except Exception as e:

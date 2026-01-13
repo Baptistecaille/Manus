@@ -12,44 +12,16 @@ from typing import Optional
 
 from agent_state import AgentStateDict, estimate_tokens, calculate_context_size
 from llm_factory import create_llm
+from nodes.schema import PlannerOutput
+
+from prompts import get_planner_system_prompt
 
 logger = logging.getLogger(__name__)
 
-# System prompt template
-SYSTEM_PROMPT = """You are an autonomous AI agent with access to a persistent Seedbox environment (a Docker container with bash, Python, and common tools).
+# System prompt is now dynamic via centralized module
+SYSTEM_PROMPT = get_planner_system_prompt()
 
-Your goal is to help the user accomplish their task by breaking it down into steps and executing them one at a time.
-
-AVAILABLE ACTIONS:
-- bash: Execute a shell command in the Seedbox
-- deep_research: Comprehensive multi-source web research on a topic (generates a detailed report)
-- search: Quick web search for information (via DuckDuckGo)
-- playwright: Navigate to a URL and extract content
-- consolidate: Compress context when running low on memory
-- complete: Task is finished, provide final summary
-
-STRICT RESPONSE FORMAT (follow exactly):
-INTERNAL_MONOLOGUE: [Your step-by-step reasoning about what to do next and why. Think through the problem carefully.]
-TODO_LIST: [Format: ✅ Done: completed items | 🔲 Next: pending items]
-NEXT_ACTION: [One of: bash|deep_research|search|playwright|consolidate|complete]
-ACTION_DETAILS: [The specific command, query, or URL for the action. Be precise.]
-REASONING: [Brief explanation of why this action moves toward the goal]
-
-IMPORTANT RULES:
-1. Always update the TODO_LIST to track progress
-2. Be specific in ACTION_DETAILS - include exact commands/queries
-3. If a command fails, analyze the error and try a different approach
-4. Use the Seedbox filesystem (/workspace) for persistent storage
-5. When task is complete, use NEXT_ACTION: complete and put the FINAL ANSWER or summary in ACTION_DETAILS
-
-WHEN TO USE DEEP_RESEARCH:
-- User asks to "research", "investigate", or "analyze" a topic in depth
-- User wants a comprehensive report or analysis with multiple sources
-- User says "deep research" or wants thorough multi-source analysis
-- Topic requires gathering and synthesizing information from many sources
-
-For deep_research, set ACTION_DETAILS to the research topic (e.g., "Latest advances in autonomous AI agents")"""
-
+# User message template for each planning step
 # User message template for each planning step
 USER_TEMPLATE = """CURRENT CONTEXT:
 {context}
@@ -63,7 +35,13 @@ CURRENT STATE:
 Iteration: {iteration_count}
 Context Size: ~{context_size} tokens
 
-Analyze the situation and provide your next action following the STRICT RESPONSE FORMAT."""
+CRITICAL INSTRUCTION: STAGING AREA PROTOCOL
+1. You MUST assume all file operations (create/edit) are initially done in a temporary directory (e.g., /workspace/temp_staging).
+2. Create this directory if it doesn't exist.
+3. Only when a file is finalized and verified should you move it to the root /workspace/ or its final destination.
+4. Clean up the temporary directory after moving the final artifact.
+
+Analyze the situation and provide your next action by populating the PlannerOutput structure."""
 
 
 def _build_context(state: AgentStateDict) -> str:
@@ -97,71 +75,8 @@ def _build_context(state: AgentStateDict) -> str:
     return "\n".join(context_parts)
 
 
-def _parse_response(response_text: str) -> dict:
-    """
-    Parse the LLM response to extract structured fields.
-
-    Args:
-        response_text: Raw LLM response text.
-
-    Returns:
-        Dict with internal_monologue, todo_list, next_action, action_details, reasoning.
-    """
-    result = {
-        "internal_monologue": "",
-        "todo_list": "",
-        "next_action": "complete",  # Default to complete if parsing fails
-        "action_details": "",
-        "reasoning": "",
-    }
-
-    # Define patterns for each section
-    patterns = {
-        "internal_monologue": r"INTERNAL_MONOLOGUE:\s*(.+?)(?=TODO_LIST:|$)",
-        "todo_list": r"TODO_LIST:\s*(.+?)(?=NEXT_ACTION:|$)",
-        "next_action": r"NEXT_ACTION:\s*(\w+)",
-        "action_details": r"ACTION_DETAILS:\s*(.+?)(?=REASONING:|$)",
-        "reasoning": r"REASONING:\s*(.+?)$",
-    }
-
-    for field, pattern in patterns.items():
-        match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
-        if match:
-            value = match.group(1).strip()
-            # Clean up the value
-            value = re.sub(r"\s+", " ", value)  # Normalize whitespace
-
-            # Remove surrounding quotes for action_details
-            if field == "action_details":
-                # Remove Markdown code blocks if present
-                value = re.sub(r"^`+|`+$", "", value).strip()
-                # Remove surrounding quotes
-                if (value.startswith('"') and value.endswith('"')) or (
-                    value.startswith("'") and value.endswith("'")
-                ):
-                    value = value[1:-1].strip()
-
-            result[field] = value
-
-    # Normalize next_action to lowercase
-    result["next_action"] = result["next_action"].lower().strip()
-
-    # Validate next_action
-    valid_actions = {
-        "bash",
-        "deep_research",
-        "search",
-        "playwright",
-        "consolidate",
-        "complete",
-    }
-    if result["next_action"] not in valid_actions:
-        logger.warning(
-            f"Invalid action '{result['next_action']}', defaulting to 'complete'"
-        )
-        result["next_action"] = "complete"
-
-    return result
+# regex parsing function `_parse_response` is removed as we use structured output
+# def _parse_response(response_text: str) -> dict: ...
 
 
 def planner_node(state: AgentStateDict) -> dict:
@@ -198,37 +113,47 @@ def planner_node(state: AgentStateDict) -> dict:
     try:
         # Create LLM and invoke
         llm = create_llm()
+        structured_llm = llm.with_structured_output(PlannerOutput)
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ]
 
-        response = llm.invoke(messages)
-        response_text = (
-            response.content if hasattr(response, "content") else str(response)
+        parsed: PlannerOutput = structured_llm.invoke(messages)
+
+        if parsed is None:
+            raise ValueError("LLM returned None for structured output")
+
+        # Log the decision
+        logger.debug(
+            f"Planner decision: Action={parsed.next_action}, Thought={parsed.internal_monologue[:50]}..."
         )
 
-        logger.debug(f"LLM Response:\n{response_text[:500]}...")
-
-        # Parse the response
-        parsed = _parse_response(response_text)
-
         # Build the assistant message for history
-        assistant_message = {"role": "assistant", "content": response_text}
+        # We perform a rough reconstruction of the response for the message history
+        # since we don't have the raw text anymore.
+        assistant_content_str = (
+            f"INTERNAL_MONOLOGUE: {parsed.internal_monologue}\n"
+            f"TODO_LIST: {parsed.todo_list}\n"
+            f"NEXT_ACTION: {parsed.next_action}\n"
+            f"ACTION_DETAILS: {parsed.action_details}\n"
+            f"REASONING: {parsed.reasoning}"
+        )
+        assistant_message = {"role": "assistant", "content": assistant_content_str}
 
         # Calculate new context size
         new_context_size = calculate_context_size(state) + estimate_tokens(
-            response_text
+            assistant_content_str
         )
 
         # Return state updates
         return {
             "messages": [assistant_message],  # Will be appended due to operator.add
-            "internal_monologue": parsed["internal_monologue"],
-            "todo_list": parsed["todo_list"],
-            "current_action": parsed["next_action"],
-            "action_details": parsed["action_details"],
+            "internal_monologue": parsed.internal_monologue,
+            "todo_list": parsed.todo_list,
+            "current_action": parsed.next_action,
+            "action_details": parsed.action_details,
             "iteration_count": state.get("iteration_count", 0) + 1,
             "context_size": new_context_size,
         }

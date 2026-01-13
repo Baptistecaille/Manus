@@ -33,8 +33,21 @@ def setup_logging(verbose: bool = False, debug: bool = False) -> None:
         level = logging.WARNING
         format_str = "%(message)s"
 
+    # Create handlers
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(logging.Formatter(format_str))
+
+    # File handler - always logs DEBUG level for comprehensive debugging
+    file_handler = logging.FileHandler("manus_agent.log", mode="a", encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+
     logging.basicConfig(
-        level=level, format=format_str, handlers=[logging.StreamHandler(sys.stdout)]
+        level=logging.DEBUG,  # Set root logger to DEBUG to capture all
+        handlers=[console_handler, file_handler],
     )
 
 
@@ -107,7 +120,10 @@ def run_agent(
     try:
         # Generate unique thread_id for this execution
         thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 150,
+        }
 
         # Use stream mode for real-time updates
         for event in graph.stream(state, config=config):

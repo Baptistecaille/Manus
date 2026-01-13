@@ -76,11 +76,17 @@ class StrReplaceEditorTool(BaseTool):
 
     def _get_safe_path(self, path: str) -> Path:
         """Get safe path within workspace."""
-        full_path = (
-            Path(path)
-            if path.startswith("/workspace")
-            else Path(self.workspace_root) / path
-        )
+        # Handle /workspace prefix which comes from LLM thinking it's in Docker
+        if path.startswith("/workspace"):
+            rel_path = path[len("/workspace") :].lstrip("/")
+            full_path = Path(self.workspace_root) / rel_path
+        else:
+            full_path = (
+                Path(self.workspace_root) / path
+                if not Path(path).is_absolute()
+                else Path(path)
+            )
+
         resolved = full_path.resolve()
         workspace = Path(self.workspace_root).resolve()
 

@@ -13,7 +13,7 @@ from tools.planning_tool import PlanningTool
 logger = logging.getLogger(__name__)
 
 
-async def planning_executor_node(state: AgentStateDict) -> Dict[str, Any]:
+def planning_executor_node(state: AgentStateDict) -> Dict[str, Any]:
     """
     Execute planning task.
 
@@ -48,7 +48,7 @@ async def planning_executor_node(state: AgentStateDict) -> Dict[str, Any]:
 
         # Generate plan
         logger.info(f"Generating plan for: {task[:100]} (detail: {detail_level})")
-        result = await planning_tool._arun(task=task, detail_level=detail_level)
+        result = planning_tool._run(task=task, detail_level=detail_level)
 
         logger.info(f"Plan generated successfully ({len(result)} chars)")
 

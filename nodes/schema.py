@@ -152,3 +152,26 @@ class SearchSummaryOutput(BaseModel):
     relevance: Literal["high", "medium", "low"] = Field(
         description="Relevance of this information to the research topic."
     )
+
+
+# =============================================================================
+# SWE PLANNER SCHEMAS
+# =============================================================================
+
+
+class SWEPlannerOutput(BaseModel):
+    """Structured output for the SWE Planner node."""
+
+    internal_monologue: str = Field(
+        description="Technical reasoning about the current situation and what to do next."
+    )
+    todo_list: str = Field(
+        description="Current state of technical tasks. Use '✅ Done', '🔲 Pending' markers."
+    )
+    next_action: Literal["bash", "edit", "complete"] = Field(
+        description="The next action to execute."
+    )
+    action_details: str = Field(
+        description="For 'bash': the exact shell command(s) to run. For 'edit': JSON with path/content. For 'complete': final summary."
+    )
+    reasoning: str = Field(description="Brief justification for this technical step.")

@@ -101,17 +101,27 @@ def hitl_handler_node(state: AgentStateDict) -> dict:
             ),
         }
 
-    # Display the breakpoint interface
-    display_breakpoint(
-        breakpoint_type,
-        state,
-        command=command,
-        risk_level=risk_level,
-        justification=justification,
-    )
+    # Validating Auto-Approve Mode
+    if state.get("auto_approve"):
+        logger.info(f"Auto-approving breakpoint: {breakpoint_name}")
+        result = BreakpointResult(
+            action="approve",
+            feedback="Auto-approved by system",
+            response_time_seconds=0.0,
+            timed_out=False,
+        )
+    else:
+        # Display the breakpoint interface
+        display_breakpoint(
+            breakpoint_type,
+            state,
+            command=command,
+            risk_level=risk_level,
+            justification=justification,
+        )
 
-    # Get user decision
-    result = get_user_decision(config, timeout_enabled=True)
+        # Get user decision
+        result = get_user_decision(config, timeout_enabled=True)
 
     # Log the intervention
     intervention = {

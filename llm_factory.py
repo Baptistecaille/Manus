@@ -197,6 +197,33 @@ def _create_openai_llm(model: str, temperature: float, **kwargs) -> BaseChatMode
     return ChatOpenAI(model=model, temperature=temperature, api_key=api_key, **kwargs)
 
 
+class OpenAIChatModel(ChatOpenAI):
+    """
+    OpenAI wrapper that uses native json_schema for structured output.
+    This enables Strict Structured Output for Chat-gpt-5-nano and compatible models.
+    """
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        # Use default method (json_schema / Strict Structured Output)
+        # This is the most reliable for OpenAI models.
+        return super().with_structured_output(schema, **kwargs)
+
+
+def _create_openai_llm(model: str, temperature: float, **kwargs) -> BaseChatModel:
+    """Create an OpenAI GPT model with native structured output support."""
+    from langchain_openai import ChatOpenAI
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "OPENAI_API_KEY environment variable is required for OpenAI provider"
+        )
+
+    return OpenAIChatModel(
+        model=model, temperature=temperature, api_key=api_key, **kwargs
+    )
+
+
 def _create_openrouter_llm(model: str, temperature: float, **kwargs) -> BaseChatModel:
     """Create a model via OpenRouter (OpenAI-compatible API)."""
     from langchain_openai import ChatOpenAI

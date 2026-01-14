@@ -46,6 +46,264 @@ def contains_sensitive_keyword(command: str) -> bool:
     return False
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 2-ACTION RULE (NEW - $2B Pattern)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Actions that count toward the 2-Action Rule for findings save
+RESEARCH_ACTIONS = {"search", "view", "browser", "crawl", "deep_research"}
+
+
+class EnhancedRouter:
+    """
+    Router with 2-Action Rule integration.
+
+    After every 2 research actions (search, view, browser, crawl),
+    forces a findings save to disk to prevent information loss.
+
+    This is part of the "$2B pattern" - persisting discoveries
+    before they get lost in context.
+
+    Example:
+        >>> router = EnhancedRouter()
+        >>> next_node, should_save = await router.route("search", state)
+        >>> if should_save:
+        ...     await planning_manager.save_findings(...)
+    """
+
+    def __init__(self):
+        """Initialize the enhanced router."""
+        self._action_counter = 0
+        self._pending_discoveries: list[str] = []
+
+    def should_save_findings(self, action: str, state: dict) -> bool:
+        """
+        Check if findings should be saved (2-Action Rule).
+
+        Args:
+            action: Current action type.
+            state: Agent state with actions_since_save.
+
+        Returns:
+            True if findings should be saved.
+        """
+        if action.lower() not in RESEARCH_ACTIONS:
+            return False
+
+        actions_since_save = state.get("actions_since_save", 0)
+        return actions_since_save >= 2
+
+    def get_state_updates_after_action(self, action: str) -> dict:
+        """
+        Get state updates to apply after executing an action.
+
+        Increments counters for planning manager integration.
+
+        Args:
+            action: The action that was just executed.
+
+        Returns:
+            Dict of state updates.
+        """
+        updates = {
+            "actions_since_refresh": (lambda s: s.get("actions_since_refresh", 0) + 1),
+        }
+
+        if action.lower() in RESEARCH_ACTIONS:
+            updates["actions_since_save"] = lambda s: s.get("actions_since_save", 0) + 1
+
+        return updates
+
+    def reset_save_counter(self) -> dict:
+        """
+        Reset the save counter after findings are saved.
+
+        Returns:
+            State update to reset counter.
+        """
+        return {"actions_since_save": 0}
+
+
+# Global instance for convenience
+_enhanced_router = EnhancedRouter()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BROWSER DETECTION KEYWORDS (NEW)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+BROWSER_KEYWORDS = [
+    "navigate",
+    "browse",
+    "visit",
+    "go to",
+    "open page",
+    "open url",
+    "website",
+    "webpage",
+    "web page",
+    "click",
+    "button",
+    "form",
+    "fill",
+    "submit",
+    "login",
+    "sign in",
+    "screenshot",
+    "scrape",
+    "extract from page",
+    "web",
+    "download from",
+    "fetch page",
+    "load page",
+]
+
+DEEP_RESEARCH_KEYWORDS = [
+    "research",
+    "analyze",
+    "summarize multiple",
+    "comprehensive",
+    "in-depth",
+    "detailed analysis",
+    "compare sources",
+    "literature review",
+    "state of the art",
+    "survey",
+]
+
+
+def should_use_browser(query: str, context: dict = None) -> bool:
+    """
+    Determine if browser automation is needed for the query.
+
+    Args:
+        query: User query or task description.
+        context: Optional context dict with additional info.
+
+    Returns:
+        True if browser automation is recommended.
+    """
+    query_lower = query.lower()
+
+    # Check for browser keywords
+    for keyword in BROWSER_KEYWORDS:
+        if keyword in query_lower:
+            return True
+
+    # Check for URL patterns
+    if "http://" in query_lower or "https://" in query_lower:
+        return True
+
+    # Check context if provided
+    if context:
+        detected_intent = context.get("detected_intent", "")
+        if detected_intent in ("web_interaction", "web_scraping"):
+            return True
+
+    return False
+
+
+def should_use_deep_research(query: str, context: dict = None) -> bool:
+    """
+    Determine if deep research is appropriate for the query.
+
+    Args:
+        query: User query or task description.
+        context: Optional context dict.
+
+    Returns:
+        True if deep research is recommended.
+    """
+    query_lower = query.lower()
+
+    for keyword in DEEP_RESEARCH_KEYWORDS:
+        if keyword in query_lower:
+            return True
+
+    # Check context
+    if context:
+        detected_intent = context.get("detected_intent", "")
+        if detected_intent == "web_research":
+            return True
+
+    return False
+
+
+def select_optimal_executor(
+    task: str,
+    available_executors: list[str],
+    context: dict = None,
+) -> str:
+    """
+    Select the best executor for a given task.
+
+    Uses keyword matching and context to score executors.
+
+    Args:
+        task: Task description.
+        available_executors: List of available executor names.
+        context: Optional context dict.
+
+    Returns:
+        Name of the recommended executor.
+    """
+    if not available_executors:
+        return "planner"
+
+    task_lower = task.lower()
+    scores: dict[str, int] = {exe: 0 for exe in available_executors}
+
+    # Browser executor scoring
+    if "browser_executor" in scores:
+        if should_use_browser(task, context):
+            scores["browser_executor"] += 10
+
+    # Deep research scoring
+    if "deep_research" in scores:
+        if should_use_deep_research(task, context):
+            scores["deep_research"] += 10
+
+    # Bash executor scoring
+    if "bash_executor" in scores:
+        bash_keywords = [
+            "run",
+            "execute",
+            "script",
+            "command",
+            "install",
+            "create file",
+        ]
+        for kw in bash_keywords:
+            if kw in task_lower:
+                scores["bash_executor"] += 3
+
+    # Editor executor scoring
+    if "editor_executor" in scores:
+        edit_keywords = ["edit", "modify", "update file", "change", "fix"]
+        for kw in edit_keywords:
+            if kw in task_lower:
+                scores["editor_executor"] += 3
+
+    # Crawl executor scoring
+    if "crawl_executor" in scores:
+        crawl_keywords = ["crawl", "scrape", "extract data"]
+        for kw in crawl_keywords:
+            if kw in task_lower:
+                scores["crawl_executor"] += 5
+
+    # Return highest scoring executor
+    best_executor = max(scores, key=lambda k: scores[k])
+
+    # Default to planner if no good match
+    if scores[best_executor] == 0:
+        return "planner"
+
+    logger.debug(
+        f"Executor selection: {task[:50]} → {best_executor} (scores: {scores})"
+    )
+    return best_executor
+
+
 def router(state: AgentStateDict) -> str:
     """
     Determine the next node to execute based on current state.

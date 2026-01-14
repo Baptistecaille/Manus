@@ -158,6 +158,46 @@ class AgentStateDict(TypedDict):
 
     final_report: str
 
+    # ═══════════════════════════════════════
+    # SECTION 13: SESSION & MEMORY (NEW)
+    # ═══════════════════════════════════════
+
+    session_id: str  # Unique session identifier for persistence
+    plan: Optional[list]  # Current execution plan steps
+    completed_steps: list  # Steps already completed
+    memory: dict  # Retrieved context from memory manager
+
+    # ═══════════════════════════════════════
+    # SECTION 14: ARTIFACTS & TOOLS (NEW)
+    # ═══════════════════════════════════════
+
+    artifacts: list  # Generated files/data artifacts [{id, name, type, path}]
+    current_tool: Optional[str]  # Currently active tool/skill
+
+    # ═══════════════════════════════════════
+    # SECTION 15: ERROR HANDLING (NEW)
+    # ═══════════════════════════════════════
+
+    error_count: int  # Consecutive error counter
+    feedback_required: bool  # Needs human intervention
+
+    # ═══════════════════════════════════════
+    # SECTION 16: ADVANCED EXECUTION (NEW)
+    # ═══════════════════════════════════════
+
+    background_mode: bool  # Running in background
+    browser_session: Optional[dict]  # Active browser session info
+
+    # ═══════════════════════════════════════
+    # SECTION 17: PLANNING MANAGER (NEW - $2B Pattern)
+    # ═══════════════════════════════════════
+
+    plan_file_path: Optional[str]  # Path to task_plan.md on disk
+    findings_file_path: Optional[str]  # Path to findings.md on disk
+    actions_since_refresh: int  # Counter for triggering plan refresh
+    actions_since_save: int  # Counter for 2-Action Rule (save findings)
+    auto_approve: bool  # Auto-approve HITL requests for testing
+
 
 def create_initial_state(
     user_query: str, hitl_mode: str = "moderate"
@@ -235,6 +275,26 @@ def create_initial_state(
         execution_status="running",
         # Deep research output
         final_report="",
+        # Session & Memory (NEW)
+        session_id="",  # Set by caller if persistence needed
+        plan=None,
+        completed_steps=[],
+        memory={},
+        # Artifacts & Tools (NEW)
+        artifacts=[],
+        current_tool=None,
+        # Error handling (NEW)
+        error_count=0,
+        feedback_required=False,
+        # Advanced execution (NEW)
+        background_mode=False,
+        browser_session=None,
+        # Planning Manager (NEW - $2B Pattern)
+        plan_file_path=None,
+        findings_file_path=None,
+        actions_since_refresh=0,
+        actions_since_save=0,
+        auto_approve=False,
     )
 
 

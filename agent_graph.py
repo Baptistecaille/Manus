@@ -28,6 +28,13 @@ from nodes.editor_executor import editor_executor_node
 from nodes.planning_executor import planning_executor_node
 from nodes.ask_human_executor import ask_human_executor_node
 
+# Planning Manager ($2B Pattern)
+from nodes.planning_manager import (
+    planning_manager_node,
+    refresh_plan_node,
+    should_refresh_plan,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -170,6 +177,10 @@ def create_agent_graph(
     if enable_hitl:
         workflow.add_node("hitl_handler", hitl_handler_node)
 
+    # Planning Manager nodes ($2B Pattern - anti goal-drift)
+    workflow.add_node("initialize_plan", planning_manager_node)
+    workflow.add_node("refresh_plan", refresh_plan_node)
+
     workflow.add_node("planner", planner_node)
     workflow.add_node("bash_executor", bash_executor_node)
     workflow.add_node("consolidator", consolidator_node)
@@ -286,8 +297,9 @@ def create_agent_graph(
         return "planner"
 
     if enable_prompt_enhancer and enable_hitl:
-        # Prompt enhancer → HITL handler (for validation)
-        workflow.add_edge("prompt_enhancer", "hitl_handler")
+        # Prompt enhancer → Initialize plan → HITL handler (for validation)
+        workflow.add_edge("prompt_enhancer", "initialize_plan")
+        workflow.add_edge("initialize_plan", "hitl_handler")
 
         # HITL handler routes based on state
         # We intercept the "planner" route to check for specialized intents first
@@ -310,12 +322,16 @@ def create_agent_graph(
             },
         )
     elif enable_prompt_enhancer:
-        # No HITL - route directly based on intent
+        # No HITL - initialize plan then route based on intent
+        workflow.add_edge("prompt_enhancer", "initialize_plan")
         workflow.add_conditional_edges(
-            "prompt_enhancer",
+            "initialize_plan",
             intent_router,
             {"swe_agent": "swe_agent", "planner": "planner"},
         )
+
+    # Refresh plan returns to planner
+    workflow.add_edge("refresh_plan", "planner")
 
     # SWE Agent returns to END (task complete) or Planner (if fallback needed)
     # For now, let's assume if SWE agent finishes, the task is done or needs check.
@@ -346,10 +362,23 @@ def create_agent_graph(
     if enable_deep_research:
         edge_map["deep_research"] = "deep_research"
 
+    # Add conditional routing: planner → (refresh_plan or direct execution)
+    # The refresh_plan decision is made BEFORE routing to executors
+    def planner_router_with_refresh(state: AgentStateDict) -> str:
+        """Route from planner, optionally through refresh_plan first."""
+        # Check if we need to refresh the plan first
+        if should_refresh_plan(state) == "refresh":
+            return "refresh_plan"
+        # Otherwise, use normal router
+        return router(state)
+
+    # Add refresh_plan to edge map
+    edge_map["refresh_plan"] = "refresh_plan"
+
     # Add conditional edges from planner
     workflow.add_conditional_edges(
         "planner",
-        router,
+        planner_router_with_refresh,
         edge_map,
     )
 

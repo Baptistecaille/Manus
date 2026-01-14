@@ -73,6 +73,34 @@ CRITICAL FORMATTING RULES:
 7. When task is complete, use NEXT_ACTION: complete and put the FINAL ANSWER in ACTION_DETAILS
 """
 
+WEB_SEARCH_FIRST_POLICY = """
+CRITICAL: PROACTIVE KNOWLEDGE ACQUISITION
+Before executing ANY code generation, file creation, or complex task:
+1. Use 'search' to verify syntax, library names, API signatures, or best practices.
+2. Only proceed to 'bash' or 'edit' AFTER confirming your approach with up-to-date information.
+3. Reserve 'deep_research' for comprehensive reports only when user explicitly requests it.
+
+This ensures your knowledge is current and reduces errors.
+"""
+
+DETAILED_CONTENT_POLICY = """
+CRITICAL: DETAILED & PEDAGOGICAL CONTENT GENERATION
+When creating educational content, documents, courses, or reports:
+1. NEVER produce superficial or summary-only content
+2. Each section must include:
+   - Detailed explanations with context and background
+   - Concrete examples and illustrations
+   - Technical details (formulas, equations, diagrams descriptions)
+   - Connections to real-world applications
+3. For courses: include learning objectives, key concepts, exercises, and review questions
+4. Minimum depth: each major topic should have 3-5 paragraphs of explanation
+5. Use clear structure with headings, subheadings, and bullet points
+6. If content seems too short, EXPAND it with additional details, examples, and explanations
+7. Target audience: assume the reader is learning this topic for the first time
+
+Quality over brevity. A comprehensive document is always preferred.
+"""
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PUBLIC API
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -91,6 +119,8 @@ def get_planner_system_prompt() -> str:
         SKILL_INSTRUCTIONS,  # Injected here
         PLANNER_RESPONSE_FORMAT,
         DEEP_RESEARCH_GUIDANCE,
+        WEB_SEARCH_FIRST_POLICY,  # Force search before coding
+        DETAILED_CONTENT_POLICY,  # Force detailed pedagogical content
     ]
     return "\n".join(parts)
 

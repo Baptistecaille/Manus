@@ -81,6 +81,7 @@ def run_agent(
     verbose: bool = True,
     debug: bool = False,
     max_steps: Optional[int] = None,
+    auto_approve: bool = False,
 ) -> AgentStateDict:
     """
     Run the Manus agent with a given task.
@@ -104,6 +105,9 @@ def run_agent(
 
     # Create initial state
     state = create_initial_state(user_query)
+    if auto_approve:
+        state["auto_approve"] = True
+        logger.info("Auto-approve mode enabled")
 
     # Compile the graph
     logger.info("Compiling agent graph...")
@@ -220,6 +224,12 @@ Examples:
         help="Enable deep research mode for comprehensive multi-source analysis",
     )
 
+    parser.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Automatically approve all HITL requests (for testing)",
+    )
+
     args = parser.parse_args()
 
     # Handle quiet mode
@@ -242,6 +252,7 @@ Examples:
                         verbose=verbose,
                         debug=args.debug,
                         max_steps=args.max_steps,
+                        auto_approve=args.auto_approve,
                     )
             except KeyboardInterrupt:
                 print("\nGoodbye!")
@@ -268,7 +279,11 @@ Proceed with NEXT_ACTION: deep_research"""
             print(f"   Topic: {args.query}\n")
 
         result = run_agent(
-            query, verbose=verbose, debug=args.debug, max_steps=args.max_steps
+            query,
+            verbose=verbose,
+            debug=args.debug,
+            max_steps=args.max_steps,
+            auto_approve=args.auto_approve,
         )
 
         # Display deep research results

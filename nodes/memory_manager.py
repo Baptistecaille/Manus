@@ -575,6 +575,29 @@ async def memory_node(state: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+def memory_node_sync(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Synchronous wrapper for memory_node.
+
+    Ensures compatibility with synchronous LangGraph execution (graph.stream).
+    """
+    import asyncio
+    import concurrent.futures
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    if loop.is_running():
+        # If we are in an event loop, we must use a separate thread to run the async code
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            return executor.submit(asyncio.run, memory_node(state)).result()
+    else:
+        return loop.run_until_complete(memory_node(state))
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # STANDALONE TEST
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -27,6 +27,8 @@ from nodes.crawl_executor import crawl_executor_node
 from nodes.editor_executor import editor_executor_node
 from nodes.planning_executor import planning_executor_node
 from nodes.ask_human_executor import ask_human_executor_node
+from nodes.document_executor import document_executor_node
+from nodes.data_analysis_executor import data_analysis_executor_node
 
 # Planning Manager ($2B Pattern)
 from nodes.planning_manager import (
@@ -34,6 +36,9 @@ from nodes.planning_manager import (
     refresh_plan_node,
     should_refresh_plan,
 )
+
+# Memory Manager
+from nodes.memory_manager import memory_node, memory_node_sync
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +186,9 @@ def create_agent_graph(
     workflow.add_node("initialize_plan", planning_manager_node)
     workflow.add_node("refresh_plan", refresh_plan_node)
 
+    # Memory Node
+    workflow.add_node("memory", memory_node_sync)
+
     workflow.add_node("planner", planner_node)
     workflow.add_node("bash_executor", bash_executor_node)
     workflow.add_node("consolidator", consolidator_node)
@@ -193,6 +201,10 @@ def create_agent_graph(
     workflow.add_node("editor_executor", editor_executor_node)
     workflow.add_node("planning_executor", planning_executor_node)
     workflow.add_node("ask_human_executor", ask_human_executor_node)
+
+    # New executors
+    workflow.add_node("document_executor", document_executor_node)
+    workflow.add_node("data_analysis_executor", data_analysis_executor_node)
 
     # Pre/post bash validation nodes
     if enable_hitl:
@@ -297,8 +309,9 @@ def create_agent_graph(
         return "planner"
 
     if enable_prompt_enhancer and enable_hitl:
-        # Prompt enhancer → Initialize plan → HITL handler (for validation)
-        workflow.add_edge("prompt_enhancer", "initialize_plan")
+        # Prompt enhancer -> Memory -> Initialize plan -> HITL handler (for validation)
+        workflow.add_edge("prompt_enhancer", "memory")
+        workflow.add_edge("memory", "initialize_plan")
         workflow.add_edge("initialize_plan", "hitl_handler")
 
         # HITL handler routes based on state
@@ -322,8 +335,9 @@ def create_agent_graph(
             },
         )
     elif enable_prompt_enhancer:
-        # No HITL - initialize plan then route based on intent
-        workflow.add_edge("prompt_enhancer", "initialize_plan")
+        # No HITL - prompt enhancer -> memory -> initialize plan -> router
+        workflow.add_edge("prompt_enhancer", "memory")
+        workflow.add_edge("memory", "initialize_plan")
         workflow.add_conditional_edges(
             "initialize_plan",
             intent_router,
@@ -350,6 +364,8 @@ def create_agent_graph(
         "editor_executor": "editor_executor",
         "planning_executor": "planning_executor",
         "ask_human_executor": "ask_human_executor",
+        "document_executor": "document_executor",
+        "data_analysis_executor": "data_analysis_executor",
         "end": END,
     }
 
@@ -412,6 +428,8 @@ def create_agent_graph(
     workflow.add_edge("editor_executor", "planner")
     workflow.add_edge("planning_executor", "planner")
     workflow.add_edge("ask_human_executor", "planner")
+    workflow.add_edge("document_executor", "planner")
+    workflow.add_edge("data_analysis_executor", "planner")
 
     if enable_deep_research:
         workflow.add_edge("deep_research", "planner")
@@ -419,11 +437,6 @@ def create_agent_graph(
     logger.info("Agent graph created successfully")
 
     return workflow
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMPILATION WITH CHECKPOINTING
-# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def compile_graph(

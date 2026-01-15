@@ -291,6 +291,20 @@ def select_optimal_executor(
             if kw in task_lower:
                 scores["crawl_executor"] += 5
 
+    # Document executor scoring
+    if "document_executor" in scores:
+        doc_keywords = ["write report", "create document", "docx", "word document"]
+        for kw in doc_keywords:
+            if kw in task_lower:
+                scores["document_executor"] += 10
+
+    # Data analysis executor scoring
+    if "data_analysis_executor" in scores:
+        data_keywords = ["analyze data", "pandas", "csv", "summary statistics", "plot"]
+        for kw in data_keywords:
+            if kw in task_lower:
+                scores["data_analysis_executor"] += 10
+
     # Return highest scoring executor
     best_executor = max(scores, key=lambda k: scores[k])
 
@@ -376,6 +390,12 @@ def router(state: AgentStateDict) -> str:
 
     if current_action == "ask":
         return "ask_human_executor"
+
+    if current_action == "document":
+        return "document_executor"
+
+    if current_action == "data_analysis":
+        return "data_analysis_executor"
 
     # Default: return to planner for next decision
     # This handles cases where action is empty or unrecognized
@@ -496,6 +516,8 @@ def get_next_node_description(node_name: str) -> str:
         "editor_executor": "Editing file...",
         "planning_executor": "Generating action plan...",
         "ask_human_executor": "Requesting user input...",
+        "document_executor": "Creating document...",
+        "data_analysis_executor": "Analyzing data...",
         "end": "Task completed",
     }
     return descriptions.get(node_name, f"Executing {node_name}...")

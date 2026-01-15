@@ -97,6 +97,8 @@ class PlannerOutput(BaseModel):
         "ask",
         "consolidate",
         "complete",
+        "document",
+        "data_analysis",
     ] = Field(description="The next tool or action to execute.")
     action_details: str = Field(
         description="Specific arguments or command for the action. For 'bash', provide the command. For 'edit', provide the JSON/YAML edit spec."

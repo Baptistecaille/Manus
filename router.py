@@ -171,6 +171,20 @@ DEEP_RESEARCH_KEYWORDS = [
     "survey",
 ]
 
+FILE_MANAGER_KEYWORDS = [
+    "organize file",
+    "sort file",
+    "zip",
+    "compress",
+    "archive",
+    "unzip",
+    "extract",
+    "convert format",
+    "convert",
+    "csv to json",
+    "json to csv",
+]
+
 
 def should_use_browser(query: str, context: dict = None) -> bool:
     """
@@ -293,7 +307,14 @@ def select_optimal_executor(
 
     # Document executor scoring
     if "document_executor" in scores:
-        doc_keywords = ["write report", "create document", "docx", "word document"]
+        doc_keywords = [
+            "write report",
+            "create document",
+            "docx",
+            "word document",
+            "write a report",
+            "generate report",
+        ]
         for kw in doc_keywords:
             if kw in task_lower:
                 scores["document_executor"] += 10
@@ -304,6 +325,16 @@ def select_optimal_executor(
         for kw in data_keywords:
             if kw in task_lower:
                 scores["data_analysis_executor"] += 10
+
+    # File manager executor scoring
+    if "file_manager_executor" in scores:
+        for kw in FILE_MANAGER_KEYWORDS:
+            if kw in task_lower:
+                scores["file_manager_executor"] += 10
+        if "directory" in task_lower and (
+            "organize" in task_lower or "list" in task_lower
+        ):
+            scores["file_manager_executor"] += 5
 
     # Return highest scoring executor
     best_executor = max(scores, key=lambda k: scores[k])
@@ -396,6 +427,9 @@ def router(state: AgentStateDict) -> str:
 
     if current_action == "data_analysis":
         return "data_analysis_executor"
+
+    if current_action == "file_manager":
+        return "file_manager_executor"
 
     # Default: return to planner for next decision
     # This handles cases where action is empty or unrecognized
@@ -518,6 +552,7 @@ def get_next_node_description(node_name: str) -> str:
         "ask_human_executor": "Requesting user input...",
         "document_executor": "Creating document...",
         "data_analysis_executor": "Analyzing data...",
+        "file_manager_executor": "Managing files...",
         "end": "Task completed",
     }
     return descriptions.get(node_name, f"Executing {node_name}...")

@@ -29,6 +29,14 @@ from nodes.planning_executor import planning_executor_node
 from nodes.ask_human_executor import ask_human_executor_node
 from nodes.document_executor import document_executor_node
 from nodes.data_analysis_executor import data_analysis_executor_node
+from nodes.file_manager_executor import file_manager_executor_node
+from nodes.search_executor import search_executor_node
+
+
+# Deep Agents Integration (NEW)
+from nodes.filesystem_executor import filesystem_executor_node
+from nodes.subagent_executor import subagent_executor_node
+
 
 # Planning Manager ($2B Pattern)
 from nodes.planning_manager import (
@@ -192,7 +200,8 @@ def create_agent_graph(
     workflow.add_node("planner", planner_node)
     workflow.add_node("bash_executor", bash_executor_node)
     workflow.add_node("consolidator", consolidator_node)
-    workflow.add_node("search", _placeholder_search_node)
+    workflow.add_node("search", search_executor_node)
+
     workflow.add_node("playwright", _placeholder_playwright_node)
 
     # Phase 1 & 2 nodes
@@ -204,7 +213,13 @@ def create_agent_graph(
 
     # New executors
     workflow.add_node("document_executor", document_executor_node)
+
     workflow.add_node("data_analysis_executor", data_analysis_executor_node)
+    workflow.add_node("file_manager_executor", file_manager_executor_node)
+
+    # Deep Agents nodes (NEW)
+    workflow.add_node("filesystem_executor", filesystem_executor_node)
+    workflow.add_node("subagent_executor", subagent_executor_node)
 
     # Pre/post bash validation nodes
     if enable_hitl:
@@ -302,10 +317,39 @@ def create_agent_graph(
         intent = state.get("detected_intent", "mixed_workflow")
         logger.info(f"Routing based on intent: {intent}")
 
+        # Check if this is a document creation request (should NOT go to SWE agent)
+        enhanced_query = state.get("enhanced_query", "") or ""
+        original_messages = state.get("messages", [])
+        user_query = ""
+        for msg in original_messages:
+            if msg.get("role") == "user":
+                user_query = msg.get("content", "")
+                break
+
+        query_lower = (enhanced_query + " " + user_query).lower()
+        document_keywords = [
+            "word",
+            "docx",
+            ".docx",
+            "cours",
+            "document",
+            "rapport",
+            "report",
+        ]
+
+        # If it's a document creation request, use planner (which routes to document_executor)
+        for keyword in document_keywords:
+            if keyword in query_lower:
+                logger.info(
+                    "Document creation detected, routing to planner (not SWE agent)"
+                )
+                return "planner"
+
         if intent in ["code_generation", "file_manipulation"]:
             return "swe_agent"
 
         # Default to general planner
+
         return "planner"
 
     if enable_prompt_enhancer and enable_hitl:
@@ -366,6 +410,10 @@ def create_agent_graph(
         "ask_human_executor": "ask_human_executor",
         "document_executor": "document_executor",
         "data_analysis_executor": "data_analysis_executor",
+        "file_manager_executor": "file_manager_executor",
+        # Deep Agents executors (NEW)
+        "filesystem_executor": "filesystem_executor",
+        "subagent_executor": "subagent_executor",
         "end": END,
     }
 
@@ -430,6 +478,11 @@ def create_agent_graph(
     workflow.add_edge("ask_human_executor", "planner")
     workflow.add_edge("document_executor", "planner")
     workflow.add_edge("data_analysis_executor", "planner")
+    workflow.add_edge("file_manager_executor", "planner")
+
+    # Deep Agents nodes return to planner
+    workflow.add_edge("filesystem_executor", "planner")
+    workflow.add_edge("subagent_executor", "planner")
 
     if enable_deep_research:
         workflow.add_edge("deep_research", "planner")

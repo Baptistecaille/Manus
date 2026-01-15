@@ -716,7 +716,7 @@ def should_refresh_plan(state: dict) -> str:
         "refresh" to go to refresh_plan_node, "skip" to bypass.
     """
     actions = state.get("actions_since_refresh", 0)
-    current_tool = state.get("current_tool", "")
+    current_tool = state.get("current_tool") or ""
 
     # Critical tools that warrant a goal check
     critical_tools = {"bash", "write", "edit", "delete", "deploy"}

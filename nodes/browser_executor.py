@@ -1,282 +1,145 @@
 """
-Browser Executor Node - Enhanced with Planning Manager integration.
+Browser Executor Node - Orchestrates web interaction tasks.
 
-Executes browser automation tasks using Playwright-based BrowserAutomationSkill
-with action logging and retry logic.
+Uses BrowserAutomationSkill to perform research, navigation, and extraction
+based on the agent's state and current action.
 """
 
+import json
 import logging
 import os
-from typing import Any, Optional
+from datetime import datetime
+from typing import Any, Dict
 
-from agent_state import AgentStateDict
+from skills.browser_automation import BrowserAutomationSkill
 
+# Import agent state definition to ensure type compatibility
+try:
+    from agent_state import AgentStateDict
+except ImportError:
+    # Relaxed type for circular imports or testing
+    AgentStateDict = Dict[str, Any]
+
+# Configure logging
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
 logger = logging.getLogger(__name__)
-
-# Maximum retry attempts for browser operations
-MAX_RETRIES = int(os.getenv("BROWSER_MAX_RETRIES", "3"))
 
 
 async def browser_executor_node(state: AgentStateDict) -> dict[str, Any]:
     """
-    Execute browser automation task with planning integration.
+    Execute browser-based tasks using Playwright.
 
-    Workflow:
-    1. Extract action from state (navigate, click, fill, screenshot, extract)
-    2. Parse action_details for URL/selector/form_data
-    3. Execute action using BrowserAutomationSkill
-    4. Log result via PlanningManager
-    5. Retry on failure (max 3 attempts)
+    Parses the `action_details` or `current_action` from the state to determine
+    navigation targets and extraction needs.
 
     Args:
-        state: Current agent state with action_details.
+        state: Current agent state.
 
     Returns:
-        Updated state with browser execution results.
-
-    Example action_details formats:
-        - "navigate: https://example.com"
-        - "click: #submit-button"
-        - "fill: #username=john, #password=secret"
-        - "screenshot: /workspace/page.png"
-        - "extract: .article-content"
+        State updates with browser execution results.
     """
-    logger.info("=== Browser Executor Node (Enhanced) ===")
+    logger.info("Starting Browser Executor")
 
-    action_details = state.get("action_details", "")
-    iteration = state.get("iteration_count", 0)
-    workspace = state.get("workspace_dir", os.getenv("WORKSPACE_DIR", "/workspace"))
+    # Extract action details
+    action_details = state.get("action_details")
+    current_action = state.get("current_action", "")
 
-    if not action_details:
-        error_msg = "Browser executor requires action_details with command"
-        logger.error(error_msg)
+    # Parse input if it's a string (e.g. from LLM output)
+    target_url = None
+    instruction = ""
+
+    if isinstance(action_details, str):
+        try:
+            # Try parsing as JSON first
+            details = json.loads(action_details)
+            target_url = details.get("url")
+            instruction = details.get("instruction", "")
+        except json.JSONDecodeError:
+            # Treat as simple string instruction
+            instruction = action_details
+            # Try to extract URL from string if present
+            words = action_details.split()
+            for word in words:
+                if word.startswith("http"):
+                    target_url = word
+                    break
+    elif isinstance(action_details, dict):
+        target_url = action_details.get("url")
+        instruction = action_details.get("instruction", "")
+
+    # Fallback: if no URL found in details, maybe the previous tool output has it
+    if not target_url:
+        logger.warning("No URL found in action details. Checking recent history...")
+        # (Optional: Logic to find URL in convo history could go here)
+
+    if not target_url and "search" not in instruction.lower():
         return {
-            "last_tool_output": error_msg,
-            "iteration_count": iteration + 1,
-            "messages": [{"role": "system", "content": f"[BROWSER ERROR] {error_msg}"}],
+            "executor_outputs": [
+                {
+                    "source": "browser_executor",
+                    "status": "failed",
+                    "output": "No URL provided for browser execution.",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            ],
+            "last_tool_output": "Error: No URL provided.",
         }
 
-    # Parse action and parameters
-    action, params = _parse_action_details(action_details)
+    # Initialize Skill
+    headless = os.getenv("BROWSER_HEADLESS", "true").lower() == "true"
+    browser_skill = BrowserAutomationSkill(headless=headless)
 
-    # Execute with retry logic
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            result = await _execute_browser_action(action, params, workspace)
+    output_data = {}
 
-            # Log action via PlanningManager (if available)
-            await _log_browser_action(
-                workspace,
-                f"Browser {action}: {params.get('target', 'N/A')[:50]}",
-                str(result)[:200],
-                success=True,
-            )
-
-            logger.info(f"Browser {action} succeeded on attempt {attempt}")
-
-            return {
-                "last_tool_output": result.get("content", str(result)),
-                "iteration_count": iteration + 1,
-                "actions_since_refresh": state.get("actions_since_refresh", 0) + 1,
-                "actions_since_save": state.get("actions_since_save", 0) + 1,
-                "browser_session": result.get("session_info"),
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": f"[BROWSER] {action.upper()} completed:\n{result.get('summary', result.get('content', '')[:500])}",
-                    }
-                ],
-            }
-
-        except Exception as e:
-            logger.warning(f"Browser attempt {attempt}/{MAX_RETRIES} failed: {e}")
-
-            if attempt == MAX_RETRIES:
-                error_msg = f"Browser {action} failed after {MAX_RETRIES} attempts: {e}"
-
-                # Log failure
-                await _log_browser_action(
-                    workspace,
-                    f"Browser {action}: {params.get('target', 'N/A')[:50]}",
-                    error_msg,
-                    success=False,
-                )
-
-                return {
-                    "last_tool_output": error_msg,
-                    "iteration_count": iteration + 1,
-                    "error_count": state.get("error_count", 0) + 1,
-                    "messages": [
-                        {"role": "system", "content": f"[BROWSER ERROR] {error_msg}"}
-                    ],
-                }
-
-    # Fallback (shouldn't reach here)
-    return {
-        "last_tool_output": "Browser execution finished unexpectedly",
-        "iteration_count": iteration + 1,
-    }
-
-
-def _parse_action_details(details: str) -> tuple[str, dict[str, Any]]:
-    """
-    Parse action details string into action type and parameters.
-
-    Formats supported:
-        - "navigate: https://example.com"
-        - "click: #selector"
-        - "fill: #field1=value1, #field2=value2"
-        - "screenshot: /path/to/file.png?full_page=true"
-        - "extract: .selector"
-        - Plain URL (defaults to navigate)
-
-    Args:
-        details: Action details string.
-
-    Returns:
-        Tuple of (action_type, params_dict).
-    """
-    details = details.strip()
-
-    # Check for action prefix
-    if ":" in details:
-        parts = details.split(":", 1)
-        action = parts[0].strip().lower()
-        remainder = parts[1].strip() if len(parts) > 1 else ""
-
-        if action == "navigate":
-            return "navigate", {"url": remainder}
-
-        elif action == "click":
-            return "click", {"selector": remainder}
-
-        elif action == "fill":
-            # Parse "selector=value, selector=value" format
-            form_data = {}
-            for pair in remainder.split(","):
-                if "=" in pair:
-                    key, value = pair.split("=", 1)
-                    form_data[key.strip()] = value.strip()
-            return "fill", {"form_data": form_data}
-
-        elif action == "screenshot":
-            # Parse path and optional params
-            if "?" in remainder:
-                path, query = remainder.split("?", 1)
-                full_page = "full_page=true" in query.lower()
-            else:
-                path = remainder
-                full_page = False
-            return "screenshot", {"path": path.strip(), "full_page": full_page}
-
-        elif action == "extract":
-            return "extract", {"selector": remainder}
-
-        else:
-            # Unknown action, treat as task description
-            return "task", {"description": details, "target": details[:50]}
-
-    # Default: if looks like URL, navigate; else treat as task
-    if details.startswith(("http://", "https://")):
-        return "navigate", {"url": details}
-
-    return "task", {"description": details, "target": details[:50]}
-
-
-async def _execute_browser_action(
-    action: str, params: dict[str, Any], workspace: str
-) -> dict[str, Any]:
-    """
-    Execute a browser action using BrowserAutomationSkill.
-
-    Args:
-        action: Action type (navigate, click, fill, screenshot, extract, task).
-        params: Action parameters.
-        workspace: Workspace directory for screenshots.
-
-    Returns:
-        Result dict with content and metadata.
-    """
-    # Import here to avoid circular imports
-    from skills.browser_automation import BrowserAutomationSkill
-
-    async with BrowserAutomationSkill(headless=True) as browser:
-        if action == "navigate":
-            result = await browser.navigate(params["url"])
-            return {
-                "content": f"Navigated to {params['url']}",
-                "summary": f"Page title: {result.get('title', 'N/A')}",
-                "session_info": {"url": params["url"], "title": result.get("title")},
-            }
-
-        elif action == "click":
-            result = await browser.click(params["selector"])
-            return {
-                "content": f"Clicked element: {params['selector']}",
-                "summary": f"Click successful: {result.get('success', False)}",
-            }
-
-        elif action == "fill":
-            result = await browser.fill_form(params["form_data"])
-            return {
-                "content": f"Filled form with {len(params['form_data'])} fields",
-                "summary": f"Fields: {', '.join(params['form_data'].keys())}",
-            }
-
-        elif action == "screenshot":
-            path = params["path"]
-            # Ensure path is within workspace
-            if not path.startswith("/"):
-                path = f"{workspace}/{path}"
-            result = await browser.screenshot(
-                path, full_page=params.get("full_page", False)
-            )
-            return {
-                "content": f"Screenshot saved to {result}",
-                "summary": f"Screenshot: {result}",
-            }
-
-        elif action == "extract":
-            text = await browser.extract_content(params["selector"])
-            return {
-                "content": text or "No content found",
-                "summary": f"Extracted {len(text or '')} characters",
-            }
-
-        elif action == "task":
-            # Complex task - use BrowserUseTool for agent-style execution
-            from tools.browser_use import BrowserUseTool
-
-            tool = BrowserUseTool()
-            result = await tool._arun(
-                task=params["description"], headless=True, max_steps=20
-            )
-            return {
-                "content": result,
-                "summary": result[:200] if result else "Task completed",
-            }
-
-        else:
-            raise ValueError(f"Unknown browser action: {action}")
-
-
-async def _log_browser_action(
-    workspace: str, action: str, result: str, success: bool
-) -> None:
-    """
-    Log browser action to progress file via PlanningManager.
-
-    Args:
-        workspace: Workspace directory.
-        action: Action description.
-        result: Result or error message.
-        success: Whether action succeeded.
-    """
     try:
-        from nodes.planning_manager import PlanningManager
+        async with browser_skill:
+            # 1. Navigate
+            if target_url:
+                result = await browser_skill.navigate(target_url)
+                if not result["success"]:
+                    raise RuntimeError(f"Navigation failed: {result.get('error')}")
 
-        manager = PlanningManager(workspace)
-        await manager.log_action(action, result, success)
+                output_data["url"] = result["url"]
+                output_data["title"] = result["title"]
+
+            # 2. Extract Content (Default action)
+            # In a real scenario, we might want specific selectors or interactions
+            # For general research, getting page text is usually the goal.
+            markdown_content = await browser_skill.get_page_text()
+
+            # Truncate if too long (safe context limit)
+            MAX_LEN = 15000
+            if len(markdown_content) > MAX_LEN:
+                markdown_content = markdown_content[:MAX_LEN] + "\n...[truncated]..."
+
+            output_data["content"] = markdown_content
+
+            # 3. Screenshot (Optional - good for verification)
+            # screenshot_path = await browser_skill.screenshot(f"/workspace/screenshot_{int(datetime.now().timestamp())}.png")
+            # output_data["screenshot"] = screenshot_path
+
+            success_msg = f"Successfully browsed {target_url or 'page'}"
+            status = "success"
+
     except Exception as e:
-        # Don't fail the main action if logging fails
-        logger.warning(f"Failed to log browser action: {e}")
+        logger.error(f"Browser execution error: {e}")
+        success_msg = f"Browser error: {str(e)}"
+        status = "failed"
+        output_data["error"] = str(e)
+
+    # Format output for state
+    return {
+        "executor_outputs": [
+            {
+                "source": "browser_executor",
+                "status": status,
+                "output": f"Browsed {target_url}\nTitle: {output_data.get('title')}\nContent Preview: {output_data.get('content', '')[:200]}...",
+                "data": output_data,
+                "timestamp": datetime.now().isoformat(),
+            }
+        ],
+        "last_tool_output": json.dumps(output_data)[
+            :2000
+        ],  # Provide raw data dump to LLM (truncated)
+    }

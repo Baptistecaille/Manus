@@ -36,7 +36,15 @@ def setup_logging(verbose: bool = False, debug: bool = False) -> None:
     # Create handlers
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
-    console_handler.setFormatter(logging.Formatter(format_str))
+
+    # Simplified format for console: just the message for INFO/cleaner look
+    if level == logging.INFO:
+        console_handler.setFormatter(logging.Formatter("%(message)s"))
+    else:
+        # Debug needs more context
+        console_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
 
     # File handler - always logs DEBUG level for comprehensive debugging
     file_handler = logging.FileHandler("manus_agent.log", mode="a", encoding="utf-8")
@@ -45,9 +53,15 @@ def setup_logging(verbose: bool = False, debug: bool = False) -> None:
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )
 
+    # Silence noisy libraries
+    noisy_libraries = ["httpx", "httpcore", "openai", "urllib3", "hpack"]
+    for lib in noisy_libraries:
+        logging.getLogger(lib).setLevel(logging.WARNING)
+
     logging.basicConfig(
-        level=logging.DEBUG,  # Set root logger to DEBUG to capture all
+        level=logging.DEBUG,  # Keep root at DEBUG to capture everything in file
         handlers=[console_handler, file_handler],
+        force=True,  # Ensure we override any existing config
     )
 
 

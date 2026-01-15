@@ -198,6 +198,29 @@ class AgentStateDict(TypedDict):
     actions_since_save: int  # Counter for 2-Action Rule (save findings)
     auto_approve: bool  # Auto-approve HITL requests for testing
 
+    # ═══════════════════════════════════════
+    # SECTION 18: DEEP AGENTS INTEGRATION (NEW)
+    # ═══════════════════════════════════════
+
+    # Filesystem tracking
+    current_directory: Optional[str]  # Current working directory in workspace
+    filesystem_history: Optional[list]  # History of filesystem operations
+
+    # Todos/Planning (Deep Agents TodoListMiddleware)
+    todos: Optional[list]  # Structured todo items from write_todos
+
+    # Sub-agents (Deep Agents SubAgentMiddleware)
+    active_subagents: Optional[list]  # List of active sub-agent IDs
+    subagent_depth: int  # Current sub-agent nesting depth (max 3)
+
+    # Eviction tracking
+    evicted_results: Optional[list]  # References to evicted large results
+    tool_results: Optional[list]  # Recent tool outputs (for eviction processing)
+
+    # Tool routing
+    tool_name: Optional[str]  # Current tool name (for Deep Agents routing)
+    tool_params: Optional[dict]  # Current tool parameters
+
 
 def create_initial_state(
     user_query: str, hitl_mode: str = "moderate"
@@ -295,6 +318,16 @@ def create_initial_state(
         actions_since_refresh=0,
         actions_since_save=0,
         auto_approve=False,
+        # Deep Agents Integration (NEW)
+        current_directory=None,
+        filesystem_history=[],
+        todos=None,
+        active_subagents=[],
+        subagent_depth=0,
+        evicted_results=[],
+        tool_results=[],
+        tool_name=None,
+        tool_params=None,
     )
 
 

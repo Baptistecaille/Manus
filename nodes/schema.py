@@ -99,7 +99,11 @@ class PlannerOutput(BaseModel):
         "complete",
         "document",
         "data_analysis",
-    ] = Field(description="The next tool or action to execute.")
+        "file_manager",
+        "filesystem",
+    ] = Field(
+        description="The next tool or action to execute. Use 'complete' when the task is fully finished."
+    )
     action_details: str = Field(
         description="Specific arguments or command for the action. For 'bash', provide the command. For 'edit', provide the JSON/YAML edit spec."
     )

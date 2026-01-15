@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 # Try to import duckduckgo-search
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
 
     DDGS_AVAILABLE = True
 except ImportError:
     DDGS_AVAILABLE = False
-    logger.warning("duckduckgo-search not installed. Search will not work.")
+    logger.warning("ddgs package not installed. Search will not work. Run: uv add ddgs")
 
 
 # Summarization prompt

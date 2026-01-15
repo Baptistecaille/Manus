@@ -10,6 +10,25 @@ import os
 
 from agent_state import AgentStateDict
 
+# Import Deep Agents tool detection
+try:
+    from middleware.deepagents_setup import (
+        FILESYSTEM_TOOLS,
+        PLANNING_TOOLS,
+        SUBAGENT_TOOLS,
+        ALL_DEEPAGENTS_TOOLS,
+        is_deepagents_tool,
+        get_tool_category,
+    )
+
+    DEEPAGENTS_AVAILABLE = True
+except ImportError:
+    DEEPAGENTS_AVAILABLE = False
+    FILESYSTEM_TOOLS = {"ls", "read_file", "write_file", "edit_file", "glob", "grep"}
+    PLANNING_TOOLS = {"write_todos"}
+    SUBAGENT_TOOLS = {"task"}
+    ALL_DEEPAGENTS_TOOLS = FILESYSTEM_TOOLS | PLANNING_TOOLS | SUBAGENT_TOOLS
+
 logger = logging.getLogger(__name__)
 
 # Default limits (can be overridden via environment)
@@ -183,6 +202,21 @@ FILE_MANAGER_KEYWORDS = [
     "convert",
     "csv to json",
     "json to csv",
+]
+
+# Deep Agents Filesystem Keywords (NEW)
+FILESYSTEM_KEYWORDS = [
+    "list files",
+    "list directory",
+    "read file",
+    "write file",
+    "create file",
+    "edit file",
+    "modify file",
+    "search files",
+    "find files",
+    "grep",
+    "glob",
 ]
 
 
@@ -431,6 +465,21 @@ def router(state: AgentStateDict) -> str:
     if current_action == "file_manager":
         return "file_manager_executor"
 
+    # Deep Agents routing (NEW)
+    if current_action in FILESYSTEM_TOOLS or current_action == "filesystem":
+        return "filesystem_executor"
+
+    if current_action in SUBAGENT_TOOLS or current_action == "subagent":
+        return "subagent_executor"
+
+    # Check tool_name for Deep Agents tools
+    tool_name = state.get("tool_name", "")
+    if tool_name and tool_name.lower() in ALL_DEEPAGENTS_TOOLS:
+        if tool_name.lower() in FILESYSTEM_TOOLS:
+            return "filesystem_executor"
+        elif tool_name.lower() in SUBAGENT_TOOLS:
+            return "subagent_executor"
+
     # Default: return to planner for next decision
     # This handles cases where action is empty or unrecognized
     if current_action:
@@ -553,6 +602,9 @@ def get_next_node_description(node_name: str) -> str:
         "document_executor": "Creating document...",
         "data_analysis_executor": "Analyzing data...",
         "file_manager_executor": "Managing files...",
+        # Deep Agents nodes
+        "filesystem_executor": "Executing filesystem operation...",
+        "subagent_executor": "Delegating to sub-agent...",
         "end": "Task completed",
     }
     return descriptions.get(node_name, f"Executing {node_name}...")

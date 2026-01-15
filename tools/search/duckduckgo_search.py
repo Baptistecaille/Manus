@@ -49,7 +49,7 @@ class DuckDuckGoSearchTool(BaseTool):
             Formatted search results
         """
         try:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
 
             results = []
 

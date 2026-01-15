@@ -12,7 +12,6 @@ dependencies = [
     "langchain-openai>=0.3.0",
     "anthropic>=0.40.0",
     "openai>=1.50.0",
-    "duckduckgo-search>=6.0.0",
     "playwright>=1.48.0",
     "paramiko>=3.5.0",
     "python-dotenv>=1.0.0",
@@ -43,6 +42,10 @@ dependencies = [
     "seaborn>=0.13.0",
     # Logging
     "loguru>=0.7.2",
+    # Deep Agents Integration (NEW)
+    "deepagents>=0.3.0",
+    "tiktoken>=0.7.0",
+    "ddgs>=9.10.0",
 ]
 
 [project.optional-dependencies]

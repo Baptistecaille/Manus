@@ -42,7 +42,9 @@ AVAILABLE ACTIONS (use EXACTLY one of these as NEXT_ACTION):
 - plan: Generate a structured step-by-step plan. ACTION_DETAILS = description of what to plan.
 - ask: Ask the user for clarification. ACTION_DETAILS = the question to ask.
 - consolidate: Compress context when running low on memory. ACTION_DETAILS = can be empty.
-- complete: Task is finished. ACTION_DETAILS = the final answer or summary for the user.
+- document: Create Word documents. ACTION_DETAILS = JSON with "filename" and "content" structure.
+- file_manager: Organize, compress, or convert files. ACTION_DETAILS = JSON with "command" (organize/compress/convert) and path.
+- complete: Task is finished. ACTION_DETAILS = the final answer or summary for the user. USE THIS WHEN ALL TASKS ARE DONE.
 """
 
 DEEP_RESEARCH_GUIDANCE = """
@@ -59,7 +61,7 @@ PLANNER_RESPONSE_FORMAT = """
 STRICT RESPONSE FORMAT (follow exactly):
 INTERNAL_MONOLOGUE: [Your step-by-step reasoning about what to do next and why. Think through the problem carefully.]
 TODO_LIST: [Format: ✅ Done: completed items | 🔲 Next: pending items]
-NEXT_ACTION: [EXACTLY one of: bash|deep_research|search|playwright|browser|crawl|edit|plan|ask|consolidate|complete]
+NEXT_ACTION: [EXACTLY one of: bash|deep_research|search|playwright|browser|crawl|edit|plan|ask|consolidate|document|file_manager|complete]
 ACTION_DETAILS: [The specific command, query, path, or URL. Must match the format expected by the action.]
 REASONING: [Brief explanation of why this action moves toward the goal]
 
